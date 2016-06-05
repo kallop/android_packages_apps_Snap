@@ -38,6 +38,7 @@ import android.location.Location;
 import android.media.CamcorderProfile;
 import android.media.CameraProfile;
 import android.media.MediaRecorder;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -96,6 +97,7 @@ public class VideoModule implements CameraModule,
     private static final int SHOW_TAP_TO_SNAPSHOT_TOAST = 7;
     private static final int SWITCH_CAMERA = 8;
     private static final int SWITCH_CAMERA_START_ANIMATION = 9;
+    private static final int SET_FOCUS_RATIO = 10;
 
     private static final int SCREEN_DELAY = 2 * 60 * 1000;
 
@@ -388,6 +390,11 @@ public class VideoModule implements CameraModule,
 
                     // Enable all camera controls.
                     mSwitchingCamera = false;
+                    break;
+                }
+
+                case SET_FOCUS_RATIO: {
+                    mUI.getFocusRing().setRadiusRatio((Float)msg.obj);
                     break;
                 }
 
@@ -844,8 +851,18 @@ public class VideoModule implements CameraModule,
             if (mPaused) return;
 
             //setCameraState(IDLE);
+            mCameraDevice.refreshParameters();
+            mFocusManager.setParameters(mCameraDevice.getParameters());
             mFocusManager.onAutoFocus(focused, false);
         }
+    }
+
+    @Override
+    public void setFocusRatio(float ratio) {
+        mHandler.removeMessages(SET_FOCUS_RATIO);
+        Message m = mHandler.obtainMessage(SET_FOCUS_RATIO);
+        m.obj = ratio;
+        mHandler.sendMessage(m);
     }
 
     private void readVideoPreferences() {
@@ -1104,6 +1121,11 @@ public class VideoModule implements CameraModule,
     @Override
     public void onResumeBeforeSuper() {
         mPaused = false;
+        mPreferences = new ComboPreferences(mActivity);
+        CameraSettings.upgradeGlobalPreferences(mPreferences.getGlobal(), mActivity);
+        mCameraId = getPreferredCameraId(mPreferences);
+        mPreferences.setLocalId(mActivity, mCameraId);
+        CameraSettings.upgradeLocalPreferences(mPreferences.getLocal());
     }
 
     @Override
@@ -1112,6 +1134,7 @@ public class VideoModule implements CameraModule,
         mZoomValue = 0;
         resetExposureCompensation();
 
+        initializeVideoControl();
         showVideoSnapshotUI(false);
 
         if (!mPreviewing) {
@@ -1131,6 +1154,7 @@ public class VideoModule implements CameraModule,
         // Initializing it here after the preview is started.
         mUI.initializeZoom(mParameters);
         mUI.setPreviewGesturesVideoUI();
+        mUI.setSwitcherIndex();
         keepScreenOnAwhile();
 
         mOrientationManager.resume();
@@ -1811,16 +1835,28 @@ public class VideoModule implements CameraModule,
     }
 
     /*
-     * Make sure we're not recording music playing in the background, ask the
-     * MediaPlaybackService to pause playback.
+     * Make sure we're not recording music playing in the background,
+     * send request to AudioManager to obtain audio focus.
      */
-    private void pauseAudioPlayback() {
-        // Shamelessly copied from MediaPlaybackService.java, which
-        // should be public, but isn't.
-        Intent i = new Intent("com.android.music.musicservicecommand");
-        i.putExtra("command", "pause");
+    private void requestAudioFocus() {
+        AudioManager am = (AudioManager)mActivity.getSystemService(Context.AUDIO_SERVICE);
 
-        mActivity.sendBroadcast(i);
+        int result = am.requestAudioFocus(null, AudioManager.STREAM_MUSIC,
+                                 AudioManager.AUDIOFOCUS_GAIN_TRANSIENT);
+
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_FAILED) {
+            Log.v(TAG, "Audio focus request failed");
+        }
+    }
+
+    private void releaseAudioFocus() {
+        AudioManager am = (AudioManager)mActivity.getSystemService(Context.AUDIO_SERVICE);
+
+        int result = am.abandonAudioFocus(null);
+
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_FAILED) {
+            Log.v(TAG, "Audio focus release failed");
+        }
     }
 
     // For testing.
@@ -1881,13 +1917,14 @@ public class VideoModule implements CameraModule,
             return false;
         }
 
-        pauseAudioPlayback();
+        requestAudioFocus();
 
         try {
             mMediaRecorder.start(); // Recording is now started
         } catch (RuntimeException e) {
             Log.e(TAG, "Could not start media recorder. ", e);
             releaseMediaRecorder();
+            releaseAudioFocus();
             // If start fails, frameworks will not lock the camera for us.
             mCameraDevice.lock();
             mStartRecPending = false;
@@ -2040,6 +2077,7 @@ public class VideoModule implements CameraModule,
         }
         // release media recorder
         releaseMediaRecorder();
+        releaseAudioFocus();
         if (!mPaused) {
             mCameraDevice.lock();
             if (!ApiHelper.HAS_SURFACE_TEXTURE_RECORDING) {

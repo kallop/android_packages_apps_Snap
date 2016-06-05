@@ -201,8 +201,8 @@ public class CameraControls extends RotatableLayout {
         mHistogramView = (HistogramView) findViewById(R.id.histogram);
 
         mTopViews = new View[] {
-            mSceneModeSwitcher, mFilterModeSwitcher, mHdrSwitcher,
-            mFrontBackSwitcher, mMenu, mAutoHdrNotice, mHistogramView
+            mMenu, mFrontBackSwitcher, mFilterModeSwitcher,
+            mSceneModeSwitcher, mHdrSwitcher, mAutoHdrNotice, mHistogramView
         };
         mBottomViews = new View[] {
             mPreview, mShutter, mSwitcher
@@ -252,8 +252,14 @@ public class CameraControls extends RotatableLayout {
 
         int w = r - l;
         int h = b - t;
-        asRow(true, w, h, rotation, mSceneModeSwitcher, mFilterModeSwitcher,
-                mFrontBackSwitcher, mHdrSwitcher, mMenu);
+
+        if (getLayoutDirection() == View.LAYOUT_DIRECTION_RTL) {
+            asRow(true, w, h, rotation, mHdrSwitcher, mSceneModeSwitcher,
+                mFilterModeSwitcher, mFrontBackSwitcher, mMenu);
+        } else {
+            asRow(true, w, h, rotation, mMenu, mFrontBackSwitcher,
+                mFilterModeSwitcher, mSceneModeSwitcher, mHdrSwitcher);
+        }
 
         center(mAutoHdrNotice, l, t + mSize, r,
                 t + mSize + mAutoHdrNotice.getMeasuredHeight(),
@@ -698,7 +704,7 @@ public class CameraControls extends RotatableLayout {
 
     public void setHistogramEnabled(boolean enabled, CameraManager.CameraProxy camera) {
         mHistogramView.setVisibility(enabled ? View.VISIBLE : View.GONE);
-        mHistogramView.setCamera(camera);
+        mHistogramView.setCamera(enabled ? camera : null);
     }
 
     public void updateHistogramData(int[] data) {

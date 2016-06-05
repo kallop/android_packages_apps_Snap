@@ -48,7 +48,6 @@ import com.android.camera.CameraPreference.OnPreferenceChangedListener;
 import com.android.camera.ui.AbstractSettingPopup;
 import com.android.camera.ui.CameraControls;
 import com.android.camera.ui.CameraRootView;
-import com.android.camera.ui.FocusIndicator;
 import com.android.camera.ui.ListSubMenu;
 import com.android.camera.ui.ModuleSwitcher;
 import com.android.camera.ui.PieRenderer;
@@ -68,7 +67,7 @@ public class VideoUI implements PieRenderer.PieListener,
     // module fields
     private final FocusRing mFocusRing;
     private CameraActivity mActivity;
-    private View mRootView;
+    private CameraRootView mRootView;
     private SurfaceHolder mSurfaceHolder;
     // An review image having same size as preview. It is displayed when
     // recording is stopped in capture intent.
@@ -102,7 +101,7 @@ public class VideoUI implements PieRenderer.PieListener,
     private boolean mIsTimeLapse = false;
     private RotateLayout mMenuLayout;
     private RotateLayout mSubMenuLayout;
-    private LinearLayout mPreviewMenuLayout;
+    private ViewGroup mPreviewMenuLayout;
 
     private View mPreviewCover;
     private SurfaceView mSurfaceView = null;
@@ -171,9 +170,8 @@ public class VideoUI implements PieRenderer.PieListener,
     public VideoUI(CameraActivity activity, VideoController controller, View parent) {
         mActivity = activity;
         mController = controller;
-        mRootView = parent;
-        mActivity.getLayoutInflater().inflate(R.layout.video_module,
-                (ViewGroup) mRootView, true);
+        mRootView = (CameraRootView) parent;
+        mActivity.getLayoutInflater().inflate(R.layout.video_module, mRootView, true);
         mPreviewCover = mRootView.findViewById(R.id.preview_cover);
         // display the view
         mSurfaceView = (SurfaceView) mRootView.findViewById(R.id.mdp_preview_content);
@@ -254,6 +252,7 @@ public class VideoUI implements PieRenderer.PieListener,
             mBottomMargin = l / 4 - mTopMargin;
         }
         mCameraControls.setMargins(mTopMargin, mBottomMargin);
+        ((ViewGroup)mRootView).removeView(mRecordingTimeRect);
     }
 
     public void cameraOrientationPreviewResize(boolean orientation){
@@ -264,7 +263,7 @@ public class VideoUI implements PieRenderer.PieListener,
     public void initializeSurfaceView() {
         if (mSurfaceView == null) {
             mSurfaceView = new SurfaceView(mActivity);
-            ((ViewGroup) mRootView).addView(mSurfaceView, 0);
+            mRootView.addView(mSurfaceView, 0);
             mSurfaceHolder = mSurfaceView.getHolder();
             mSurfaceHolder.addCallback(this);
         }
@@ -333,7 +332,7 @@ public class VideoUI implements PieRenderer.PieListener,
         }
 
         mCameraControls.setPreviewRatio(mAspectRatio, false);
-        layoutPreview((float)ratio);
+        layoutPreview((float) ratio);
     }
 
     private void layoutPreview(float ratio) {
@@ -489,6 +488,10 @@ public class VideoUI implements PieRenderer.PieListener,
         mSwitcher.setVisibility(View.VISIBLE);
     }
 
+    public void setSwitcherIndex() {
+        mSwitcher.setCurrentIndex(ModuleSwitcher.VIDEO_MODULE_INDEX);
+    }
+
     public boolean collapseCameraControls() {
         boolean ret = false;
         mSwitcher.closePopup();
@@ -520,7 +523,7 @@ public class VideoUI implements PieRenderer.PieListener,
     }
 
     public void initDisplayChangeListener() {
-        ((CameraRootView) mRootView).setDisplayChangeListener(this);
+        mRootView.setDisplayChangeListener(this);
     }
 
     public void setDisplayOrientation(int orientation) {
@@ -533,7 +536,7 @@ public class VideoUI implements PieRenderer.PieListener,
     }
 
     public void removeDisplayChangeListener() {
-        ((CameraRootView) mRootView).removeDisplayChangeListener();
+        mRootView.removeDisplayChangeListener();
     }
 
 // no customvideo?
@@ -686,40 +689,41 @@ public class VideoUI implements PieRenderer.PieListener,
 
     public void dismissLevel1() {
         if (mMenuLayout != null) {
-            ((ViewGroup) mRootView).removeView(mMenuLayout);
+            mRootView.removeView(mMenuLayout);
             mMenuLayout = null;
         }
     }
 
     public void dismissLevel2() {
         if (mSubMenuLayout != null) {
-            ((ViewGroup) mRootView).removeView(mSubMenuLayout);
+            mRootView.removeView(mSubMenuLayout);
             mSubMenuLayout = null;
         }
     }
 
     public boolean sendTouchToPreviewMenu(MotionEvent ev) {
+        ev.offsetLocation(-mPreviewMenuLayout.getLeft(), -mPreviewMenuLayout.getTop());
         return mPreviewMenuLayout.dispatchTouchEvent(ev);
     }
 
     public boolean sendTouchToMenu(MotionEvent ev) {
         if (mMenuLayout != null) {
-            View v = mMenuLayout.getChildAt(0);
-            return v.dispatchTouchEvent(ev);
+            ev.offsetLocation(-mMenuLayout.getLeft(), -mMenuLayout.getTop());
+            return mMenuLayout.dispatchTouchEvent(ev);
         }
         return false;
     }
 
     public void dismissSceneModeMenu() {
         if (mPreviewMenuLayout != null) {
-            ((ViewGroup) mRootView).removeView(mPreviewMenuLayout);
+            mRootView.removeView(mPreviewMenuLayout);
             mPreviewMenuLayout = null;
         }
     }
 
     public void removeSceneModeMenu() {
         if (mPreviewMenuLayout != null) {
-            ((ViewGroup) mRootView).removeView(mPreviewMenuLayout);
+            mRootView.removeView(mPreviewMenuLayout);
             mPreviewMenuLayout = null;
         }
         cleanupListview();
@@ -733,27 +737,20 @@ public class VideoUI implements PieRenderer.PieListener,
     }
 
     public void showPopup(ListView popup, int level, boolean animate) {
-        FrameLayout.LayoutParams layoutParams;
         hideUI();
 
         popup.setVisibility(View.VISIBLE);
         if (level == 1) {
             if (mMenuLayout == null) {
                 mMenuLayout = new RotateLayout(mActivity, null);
-                if (mRootView.getLayoutDirection() != View.LAYOUT_DIRECTION_RTL) {
-                    layoutParams = new FrameLayout.LayoutParams(
-                            CameraActivity.SETTING_LIST_WIDTH_1, LayoutParams.WRAP_CONTENT,
-                            Gravity.LEFT | Gravity.TOP);
-                } else {
-                    layoutParams = new FrameLayout.LayoutParams(
-                            CameraActivity.SETTING_LIST_WIDTH_1, LayoutParams.WRAP_CONTENT,
-                            Gravity.RIGHT | Gravity.TOP);
-                }
-                mMenuLayout.setLayoutParams(layoutParams);
-                ((ViewGroup) mRootView).addView(mMenuLayout);
+                mMenuLayout.setRootView(mRootView);
+                mMenuLayout.setLayoutParams(new FrameLayout.LayoutParams(
+                        CameraActivity.SETTING_LIST_WIDTH_1, LayoutParams.WRAP_CONTENT,
+                        Gravity.START | Gravity.TOP));
+                mRootView.addView(mMenuLayout);
             }
-            mMenuLayout.setOrientation(mOrientation, true);
             mMenuLayout.addView(popup);
+            mMenuLayout.setOrientation(mOrientation, true);
         }
         if (level == 2) {
             if (mSubMenuLayout == null) {
@@ -762,29 +759,25 @@ public class VideoUI implements PieRenderer.PieListener,
                         CameraActivity.SETTING_LIST_WIDTH_2, LayoutParams.WRAP_CONTENT);
                 mSubMenuLayout.setLayoutParams(params);
 
-                ((ViewGroup) mRootView).addView(mSubMenuLayout);
-            }
-            if (mRootView.getLayoutDirection() != View.LAYOUT_DIRECTION_RTL) {
-                layoutParams = new FrameLayout.LayoutParams(
-                        CameraActivity.SETTING_LIST_WIDTH_2, LayoutParams.WRAP_CONTENT,
-                        Gravity.LEFT | Gravity.TOP);
-            } else {
-                layoutParams = new FrameLayout.LayoutParams(
-                        CameraActivity.SETTING_LIST_WIDTH_2, LayoutParams.WRAP_CONTENT,
-                        Gravity.RIGHT | Gravity.TOP);
+                mRootView.addView(mSubMenuLayout);
             }
 
-            int screenHeight = (mOrientation == 0 || mOrientation == 180)
-                    ? mRootView.getHeight() : mRootView.getWidth();
+            final int containerHeight =
+                    mRootView.getClientRectForOrientation(mOrientation).height();
             int height = ((ListSubMenu) popup).getPreCalculatedHeight();
-            int yBase = ((ListSubMenu) popup).getYBase();
-            int y = Math.max(0, yBase);
-            if (yBase + height > screenHeight)
-                y = Math.max(0, screenHeight - height);
-            if (mRootView.getLayoutDirection() != View.LAYOUT_DIRECTION_RTL) {
-                layoutParams.setMargins(CameraActivity.SETTING_LIST_WIDTH_1, y, 0, 0);
-            } else {
+            int yBase = ((ListSubMenu) popup).getYBase(), y = yBase;
+            if (yBase + height > containerHeight) {
+                y = Math.max(0, containerHeight - height);
+            }
+
+            final FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
+                    CameraActivity.SETTING_LIST_WIDTH_2, LayoutParams.WRAP_CONTENT,
+                    Gravity.START | Gravity.TOP);
+
+            if (isRtl()) {
                 layoutParams.setMargins(0, y, CameraActivity.SETTING_LIST_WIDTH_1, 0);
+            } else {
+                layoutParams.setMargins(CameraActivity.SETTING_LIST_WIDTH_1, y, 0, 0);
             }
 
             mSubMenuLayout.setLayoutParams(layoutParams);
@@ -805,12 +798,16 @@ public class VideoUI implements PieRenderer.PieListener,
         return mMenuLayout;
     }
 
-    public void setPreviewMenuLayout(LinearLayout layout) {
+    public void setPreviewMenuLayout(ViewGroup layout) {
         mPreviewMenuLayout = layout;
     }
 
     public ViewGroup getPreviewMenuLayout() {
         return mPreviewMenuLayout;
+    }
+
+    public boolean isRtl() {
+        return mRootView.getLayoutDirection() == View.LAYOUT_DIRECTION_RTL;
     }
 
     public void showPopup(AbstractSettingPopup popup) {
@@ -886,15 +883,13 @@ public class VideoUI implements PieRenderer.PieListener,
             mShutterButton.setImageResource(R.drawable.shutter_button_video_stop);
             hideSwitcher();
             mRecordingTimeView.setText("");
-            mRecordingTimeView.setVisibility(View.VISIBLE);
-            mPauseButton.setVisibility(mIsTimeLapse ? View.GONE : View.VISIBLE);
+            ((ViewGroup)mRootView).addView(mRecordingTimeRect);
         } else {
             mShutterButton.setImageResource(R.drawable.btn_new_shutter_video);
             if (!mController.isVideoCaptureIntent()) {
                 showSwitcher();
             }
-            mRecordingTimeView.setVisibility(View.GONE);
-            mPauseButton.setVisibility(View.GONE);
+            ((ViewGroup)mRootView).removeView(mRecordingTimeRect);
         }
     }
 
@@ -1050,7 +1045,7 @@ public class VideoUI implements PieRenderer.PieListener,
         mController.onPreviewUIDestroyed();
     }
 
-    public View getRootView() {
+    public CameraRootView getRootView() {
         return mRootView;
     }
 
@@ -1103,8 +1098,6 @@ public class VideoUI implements PieRenderer.PieListener,
         }
         if (mPreviewMenuLayout != null) {
             ViewGroup vg = (ViewGroup) mPreviewMenuLayout.getChildAt(0);
-            if (vg != null)
-                vg = (ViewGroup) vg.getChildAt(0);
             if (vg != null) {
                 for (int i = vg.getChildCount() - 1; i >= 0; --i) {
                     RotateLayout l = (RotateLayout) vg.getChildAt(i);

@@ -141,6 +141,7 @@ public class PhotoModule
     private static final int SWITCH_TO_GCAM_MODULE = 12;
     private static final int ON_PREVIEW_STARTED = 13;
     private static final int UPDATE_GESTURES_UI = 14;
+    private static final int SET_FOCUS_RATIO = 15;
 
     // The subset of parameters we need to update in setCameraParameters().
     private static final int UPDATE_PARAM_INITIALIZE = 1;
@@ -488,6 +489,11 @@ public class PhotoModule
 
                 case UPDATE_GESTURES_UI: {
                     updateGesturesUI();
+                    break;
+                }
+
+                case SET_FOCUS_RATIO: {
+                    mUI.getFocusRing().setRadiusRatio((Float)msg.obj);
                     break;
                 }
             }
@@ -935,6 +941,14 @@ public class PhotoModule
         }
     }
 
+    @Override
+    public void setFocusRatio(float ratio) {
+        mHandler.removeMessages(SET_FOCUS_RATIO);
+        Message m = mHandler.obtainMessage(SET_FOCUS_RATIO);
+        m.obj = ratio;
+        mHandler.sendMessage(m);
+    }
+
     // TODO: need to check cached background apps memory and longshot ION memory
     private boolean isLongshotNeedCancel() {
         if (SECONDARY_SERVER_MEM == 0) {
@@ -969,6 +983,11 @@ public class PhotoModule
 
     private final class LongshotShutterCallback
             implements CameraShutterCallback {
+        private int mExpectedLongshotSnapNum;
+
+        public LongshotShutterCallback() {
+            mExpectedLongshotSnapNum = mLongshotSnapNum;
+        }
 
         @Override
         public void onShutter(CameraProxy camera) {
@@ -976,6 +995,9 @@ public class PhotoModule
             mShutterLag = mShutterCallbackTime - mCaptureStartTime;
             Log.e(TAG, "[KPI Perf] PROFILE_SHUTTER_LAG mShutterLag = " + mShutterLag + "ms");
             synchronized(mCameraDevice) {
+                if (mExpectedLongshotSnapNum != mLongshotSnapNum) {
+                    return;
+                }
 
                 if (++mLongshotSnapNum >= mLongShotMaxSnap &&
                     (mLongShotMaxSnap != -1)) {
@@ -1189,6 +1211,21 @@ public class PhotoModule
                 mUI.setSwipingEnabled(true);
             }
 
+            ExifInterface exif = Exif.getExif(jpegData);
+            boolean overrideMakerAndModelTag = false;
+            if (mApplicationContext != null) {
+                overrideMakerAndModelTag =
+                    mApplicationContext.getResources()
+                       .getBoolean(R.bool.override_maker_and_model_tag);
+            }
+
+            if (overrideMakerAndModelTag) {
+                ExifTag maker = exif.buildTag(ExifInterface.TAG_MAKE, Build.MANUFACTURER);
+                exif.setTag(maker);
+                ExifTag model = exif.buildTag(ExifInterface.TAG_MODEL, Build.MODEL);
+                exif.setTag(model);
+            }
+
             mReceivedSnapNum = mReceivedSnapNum + 1;
             mJpegPictureCallbackTime = System.currentTimeMillis();
             if(mSnapshotMode == CameraInfo.CAMERA_SUPPORT_MODE_ZSL) {
@@ -1281,7 +1318,6 @@ public class PhotoModule
                 }
             }
             if (!mRefocus || (mRefocus && mReceivedSnapNum == 7)) {
-                ExifInterface exif = Exif.getExif(jpegData);
                 int orientation = Exif.getOrientation(exif);
                 if (!mIsImageCaptureIntent) {
                     // Burst snapshot. Generate new image name.
@@ -1432,6 +1468,8 @@ public class PhotoModule
                     setCameraState(IDLE);
                     break;
             }
+            mCameraDevice.refreshParameters();
+            mFocusManager.setParameters(mCameraDevice.getParameters());
             mFocusManager.onAutoFocus(focused, mUI.isShutterPressed());
         }
     }
@@ -1442,6 +1480,8 @@ public class PhotoModule
         @Override
         public void onAutoFocusMoving(
                 boolean moving, CameraProxy camera) {
+            mCameraDevice.refreshParameters();
+            mFocusManager.setParameters(mCameraDevice.getParameters());
             mFocusManager.onAutoFocusMoving(moving);
         }
     }
@@ -2248,6 +2288,11 @@ public class PhotoModule
     @Override
     public void onResumeBeforeSuper() {
         mPaused = false;
+        mPreferences = new ComboPreferences(mActivity);
+        CameraSettings.upgradeGlobalPreferences(mPreferences.getGlobal(), mActivity);
+        mCameraId = getPreferredCameraId(mPreferences);
+        mPreferences.setLocalId(mActivity, mCameraId);
+        CameraSettings.upgradeLocalPreferences(mPreferences.getLocal());
     }
 
     private void openCamera() {
@@ -2294,6 +2339,7 @@ public class PhotoModule
             Log.v(TAG, "On resume.");
             onResumeTasks();
         }
+        mUI.setSwitcherIndex();
         mHandler.post(new Runnable(){
             @Override
             public void run(){
@@ -2981,6 +3027,7 @@ public class PhotoModule
         if (CameraUtil.isSupported(colorEffect, mParameters.getSupportedColorEffects())) {
             mParameters.setColorEffect(colorEffect);
         }
+
         //Set Saturation
         String saturationStr = getSaturationSafe();
         if (saturationStr != null) {
@@ -3050,15 +3097,26 @@ public class PhotoModule
                     pref_camera_tnr_value_off))) {
                 mParameters.set(CameraSettings.KEY_QC_CDS_MODE,
                         mActivity.getString(R.string.pref_camera_cds_value_off));
-                mUI.overrideSettings(CameraSettings.KEY_QC_CDS_MODE,
-                        mActivity.getString(R.string.pref_camera_cds_value_off));
+                mActivity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        mUI.overrideSettings(CameraSettings.KEY_QC_CDS_MODE,
+                            mActivity.getString(R.string.pref_camera_cds_value_off));
+                    }
+                });
                 if (cds != null) {
                     mPrevSavedCDS = cds;
                 }
                 isTNREnabled = true;
             } else if (isTNREnabled) {
                 mParameters.set(CameraSettings.KEY_QC_CDS_MODE, mPrevSavedCDS);
-                mUI.overrideSettings(CameraSettings.KEY_QC_CDS_MODE, mPrevSavedCDS);
+                mActivity.runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        mUI.overrideSettings(CameraSettings.KEY_QC_CDS_MODE,
+                            mPrevSavedCDS);
+                    }
+                });
                 isTNREnabled = false;
             }
             mParameters.set(CameraSettings.KEY_QC_TNR_MODE, tnr);
@@ -3439,8 +3497,12 @@ public class PhotoModule
         try {
             android.util.Size previewSize = android.util.Size.parseSize(previewSizeForPhoto);
 
-            optimalSize.width = previewSize.getWidth();
-            optimalSize.height = previewSize.getHeight();
+            for (Size s : sizes) {
+                if (s.width == previewSize.getWidth() && s.height == previewSize.getHeight()) {
+                    optimalSize.width = previewSize.getWidth();
+                    optimalSize.height = previewSize.getHeight();
+                }
+            }
             Log.v(TAG, "Preview resolution hardcoded to " + optimalSize.width + "x" + optimalSize.height);
         } catch (NumberFormatException e) {
             Log.e(TAG, "Invalid preview resolution: " + previewSizeForPhoto);
@@ -3507,6 +3569,11 @@ public class PhotoModule
                 }
                 if (mLgeHdrMode) {
                     mParameters.set(CameraSettings.KEY_SNAPCAM_HDR_MODE, CameraSettings.LGE_HDR_MODE_ON);
+                    // Force enable ZSL mode for LG HDR
+                    try {
+                        mUI.setPreference(CameraSettings.KEY_ZSL, Parameters.ZSL_ON);
+                    } catch (NullPointerException e) {
+                    }
                 }
             } else {
                 if (mLgeHdrMode) {
@@ -3674,6 +3741,7 @@ public class PhotoModule
 
             CameraUtil.dumpParameters(mParameters);
             mCameraDevice.setParameters(mParameters);
+            mFocusManager.setParameters(mParameters);
 
             // Switch to gcam module if HDR+ was selected
             if (doModeSwitch && !mIsImageCaptureIntent) {

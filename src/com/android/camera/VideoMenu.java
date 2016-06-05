@@ -38,6 +38,7 @@ import android.widget.LinearLayout;
 import android.widget.FrameLayout;
 import android.widget.FrameLayout.LayoutParams;
 
+import com.android.camera.ui.CameraRootView;
 import com.android.camera.ui.ListSubMenu;
 import com.android.camera.ui.ListMenu;
 import com.android.camera.ui.TimeIntervalPopup;
@@ -47,8 +48,6 @@ import org.codeaurora.snapcam.R;
 import android.widget.HorizontalScrollView;
 import android.widget.Toast;
 import android.view.ViewGroup;
-import android.view.WindowManager;
-import android.view.Display;
 import com.android.camera.ui.RotateLayout;
 import com.android.camera.util.CameraUtil;
 import android.text.TextUtils;
@@ -87,8 +86,8 @@ public class VideoMenu extends MenuController
     private boolean mIsVideoTNREnabled = false;
     private boolean mIsVideoCDSUpdated = false;
     private static final int ANIMATION_DURATION = 300;
-    private static final int CLICK_THRESHOLD = 200;
     private int previewMenuSize;
+    private Rect mTmpRect = new Rect();
 
     public VideoMenu(CameraActivity activity, VideoUI ui) {
         super(activity);
@@ -233,37 +232,21 @@ public class VideoMenu extends MenuController
         mPopupStatus = POPUP_IN_ANIMATION_SLIDE;
 
         ViewPropertyAnimator vp = v.animate();
-        if (View.LAYOUT_DIRECTION_RTL == TextUtils
-                .getLayoutDirectionFromLocale(Locale.getDefault())) {
-            switch (mUI.getOrientation()) {
-                case 0:
-                    vp.translationXBy(v.getWidth());
-                    break;
-                case 90:
-                    vp.translationYBy(-2 * v.getHeight());
-                    break;
-                case 180:
-                    vp.translationXBy(-2 * v.getWidth());
-                    break;
-                case 270:
-                    vp.translationYBy(v.getHeight());
-                    break;
-            }
-        } else {
-            switch (mUI.getOrientation()) {
-                case 0:
-                    vp.translationXBy(-v.getWidth());
-                    break;
-                case 90:
-                    vp.translationYBy(2 * v.getHeight());
-                    break;
-                case 180:
-                    vp.translationXBy(2 * v.getWidth());
-                    break;
-                case 270:
-                    vp.translationYBy(-v.getHeight());
-                    break;
-            }
+        int sign = mUI.isRtl() ? -1 : 1;
+
+        switch (mUI.getOrientation()) {
+            case 0:
+                vp.translationXBy(-v.getWidth() * sign);
+                break;
+            case 90:
+                vp.translationYBy(2 * v.getHeight() * sign);
+                break;
+            case 180:
+                vp.translationXBy(2 * v.getWidth() * sign);
+                break;
+            case 270:
+                vp.translationYBy(-v.getHeight() * sign);
+                break;
         }
 
         vp.setListener(new AnimatorListener() {
@@ -320,54 +303,30 @@ public class VideoMenu extends MenuController
             orientation = 0;
 
         ViewPropertyAnimator vp = v.animate();
+        int sign = mUI.isRtl() ? -1 : 1;
         float dest;
-        if (View.LAYOUT_DIRECTION_RTL == TextUtils
-                .getLayoutDirectionFromLocale(Locale.getDefault())) {
-            switch (orientation) {
-                case 0:
-                    dest = v.getX();
-                    v.setX(-(dest - delta));
-                    vp.translationX(dest);
-                    break;
-                case 90:
-                    dest = v.getY();
-                    v.setY(-(dest + delta));
-                    vp.translationY(dest);
-                    break;
-                case 180:
-                    dest = v.getX();
-                    v.setX(-(dest + delta));
-                    vp.translationX(dest);
-                    break;
-                case 270:
-                    dest = v.getY();
-                    v.setY(-(dest - delta));
-                    vp.translationY(dest);
-                    break;
-            }
-        } else {
-            switch (orientation) {
-                case 0:
-                    dest = v.getX();
-                    v.setX(dest - delta);
-                    vp.translationX(dest);
-                    break;
-                case 90:
-                    dest = v.getY();
-                    v.setY(dest + delta);
-                    vp.translationY(dest);
-                    break;
-                case 180:
-                    dest = v.getX();
-                    v.setX(dest + delta);
-                    vp.translationX(dest);
-                    break;
-                case 270:
-                    dest = v.getY();
-                    v.setY(dest - delta);
-                    vp.translationY(dest);
-                    break;
-            }
+
+        switch (orientation) {
+            case 0:
+                dest = v.getX();
+                v.setX((dest - delta) * sign);
+                vp.translationX(dest);
+                break;
+            case 90:
+                dest = v.getY();
+                v.setY((dest + delta) * sign);
+                vp.translationY(dest);
+                break;
+            case 180:
+                dest = v.getX();
+                v.setX((dest + delta) * sign);
+                vp.translationX(dest);
+                break;
+            case 270:
+                dest = v.getY();
+                v.setY((dest - delta) * sign);
+                vp.translationY(dest);
+                break;
         }
 
         vp.setDuration(ANIMATION_DURATION).start();
@@ -384,13 +343,9 @@ public class VideoMenu extends MenuController
             return;
         mPreviewMenuStatus = PREVIEW_MENU_IN_ANIMATION;
 
-        ViewPropertyAnimator vp = v.animate();
-        if (View.LAYOUT_DIRECTION_RTL == TextUtils
-                .getLayoutDirectionFromLocale(Locale.getDefault())) {
-            vp.translationXBy(v.getWidth()).setDuration(ANIMATION_DURATION);
-        } else {
-            vp.translationXBy(-v.getWidth()).setDuration(ANIMATION_DURATION);
-        }
+        ViewPropertyAnimator vp = v.animate()
+                .translationXBy(v.getWidth() * (mUI.isRtl() ? -1 : 1))
+                .setDuration(ANIMATION_DURATION);
         vp.setListener(new AnimatorListener() {
             @Override
             public void onAnimationStart(Animator animation) {
@@ -421,23 +376,20 @@ public class VideoMenu extends MenuController
                 || mPopupStatus == POPUP_IN_ANIMATION_SLIDE
                 || mPopupStatus == POPUP_IN_ANIMATION_FADE)
             return false;
-        if (mUI.getMenuLayout() == null)
-            return false;
-        Rect rec = new Rect();
-        mUI.getMenuLayout().getChildAt(0).getHitRect(rec);
-        return rec.contains((int) ev.getX(), (int) ev.getY());
+        return isOverView(mUI.getMenuLayout(), ev);
     }
 
     public boolean isOverPreviewMenu(MotionEvent ev) {
         if (mPreviewMenuStatus != PREVIEW_MENU_ON)
             return false;
-        if (mUI.getPreviewMenuLayout() == null)
+        return isOverView(mUI.getPreviewMenuLayout(), ev);
+    }
+
+    private boolean isOverView(View view, MotionEvent ev) {
+        if (view == null)
             return false;
-        Rect rec = new Rect();
-        mUI.getPreviewMenuLayout().getChildAt(0).getHitRect(rec);
-        rec.top += (int) mUI.getPreviewMenuLayout().getY();
-        rec.bottom += (int) mUI.getPreviewMenuLayout().getY();
-        return rec.contains((int) ev.getX(), (int) ev.getY());
+        view.getHitRect(mTmpRect);
+        return mTmpRect.contains((int) ev.getX(), (int) ev.getY());
     }
 
     public boolean isMenuBeingShown() {
@@ -524,9 +476,8 @@ public class VideoMenu extends MenuController
                 addFilterMode();
                 ViewGroup menuLayout = mUI.getPreviewMenuLayout();
                 if (menuLayout != null) {
-                    View view = menuLayout.getChildAt(0);
                     mUI.adjustOrientation();
-                    animateSlideIn(view, previewMenuSize, false);
+                    animateSlideIn(menuLayout, previewMenuSize, false);
                 }
             }
         });
@@ -549,8 +500,6 @@ public class VideoMenu extends MenuController
         if (!mIsDefaultToPortrait) {
             rotation = (rotation + 90) % 360;
         }
-        WindowManager wm = (WindowManager) mActivity.getSystemService(Context.WINDOW_SERVICE);
-        Display display = wm.getDefaultDisplay();
         CharSequence[] entries = pref.getEntries();
 
         Resources r = mActivity.getResources();
@@ -581,22 +530,23 @@ public class VideoMenu extends MenuController
                 gridRes, null, false);
 
         mUI.dismissSceneModeMenu();
-        LinearLayout previewMenuLayout = new LinearLayout(mActivity);
-        mUI.setPreviewMenuLayout(previewMenuLayout);
+        mUI.setPreviewMenuLayout(basic);
         ViewGroup.LayoutParams params = null;
+        CameraRootView rootView = mUI.getRootView();
         if (portrait) {
             params = new ViewGroup.LayoutParams(size, LayoutParams.MATCH_PARENT);
-            previewMenuLayout.setLayoutParams(params);
-            ((ViewGroup) mUI.getRootView()).addView(previewMenuLayout);
         } else {
             params = new ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT, size);
-            previewMenuLayout.setLayoutParams(params);
-            ((ViewGroup) mUI.getRootView()).addView(previewMenuLayout);
-            previewMenuLayout.setY(display.getHeight() - size);
+
+            int rootViewBottom = rootView.getClientRectForOrientation(rotation).bottom;
+            basic.setY(rootViewBottom - size);
         }
-        basic.setLayoutParams(new FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT,
-                LayoutParams.MATCH_PARENT));
+        basic.setLayoutParams(params);
+        rootView.addView(basic);
+
         LinearLayout layout = (LinearLayout) basic.findViewById(R.id.layout);
+        Rect insets = rootView.getInsetsForOrientation(rotation);
+        layout.setPadding(insets.left, insets.top, insets.right, insets.bottom);
 
         final View[] views = new View[entries.length];
         int init = pref.getCurrentIndex();
@@ -607,24 +557,14 @@ public class VideoMenu extends MenuController
             ImageView imageView = (ImageView) layout2.findViewById(R.id.image);
             final int j = i;
 
-            layout2.setOnTouchListener(new View.OnTouchListener() {
-                private long startTime;
-
+            layout2.setOnClickListener(new View.OnClickListener() {
                 @Override
-                public boolean onTouch(View v, MotionEvent event) {
-                    if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                        startTime = System.currentTimeMillis();
-                    } else if (event.getAction() == MotionEvent.ACTION_UP) {
-                        if (System.currentTimeMillis() - startTime < CLICK_THRESHOLD) {
-                            pref.setValueIndex(j);
-                            for (View v1 : views) {
-                                v1.setActivated(v1 == v);
-                            }
-                            onSettingChanged(pref);
-                        }
-
+                public void onClick(View v) {
+                    pref.setValueIndex(j);
+                    for (View v1 : views) {
+                        v1.setActivated(v1 == v);
                     }
-                    return true;
+                    onSettingChanged(pref);
                 }
             });
 
@@ -635,7 +575,6 @@ public class VideoMenu extends MenuController
             label.setText(entries[i]);
             layout.addView(layout2);
         }
-        previewMenuLayout.addView(basic);
         mPreviewMenu = basic;
     }
 
